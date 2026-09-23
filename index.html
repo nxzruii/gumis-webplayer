@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Gumi's WebPlayer — Conectar Spotify</title>
+<style>
+  :root{
+    --bg:#241a2b; --panel:#3a2440; --plum:#59345f; --wine:#873d59;
+    --rose:#b66d78; --cream:#f2c4d0;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+    background:var(--bg); font-family:"Segoe UI",system-ui,sans-serif; color:var(--cream);
+    padding:24px;
+  }
+  .card{
+    background:var(--panel); border-radius:18px; padding:32px;
+    max-width:460px; width:100%; box-shadow:0 10px 40px rgba(0,0,0,.5);
+  }
+  h1{ font-size:20px; margin:0 0 6px; }
+  p{ color:#d8b9c3; font-size:14px; line-height:1.5; }
+  button{
+    width:100%; padding:14px; border:0; border-radius:10px; cursor:pointer;
+    background:linear-gradient(135deg,var(--wine),var(--rose)); color:var(--cream);
+    font-weight:700; font-size:15px; margin-top:14px;
+  }
+  button:hover{ filter:brightness(1.1); }
+  textarea{
+    width:100%; margin-top:10px; padding:10px; border-radius:8px; border:1px solid var(--plum);
+    background:#241a2b; color:var(--cream); font-family:monospace; font-size:12px; resize:vertical;
+    min-height:80px;
+  }
+  .copybtn{ background:var(--plum); margin-top:6px; }
+  .hidden{ display:none; }
+  .ok{ color:#9be29b; font-size:13px; margin-top:8px; }
+  code{ background:#241a2b; padding:2px 6px; border-radius:6px; }
+</style>
+</head>
+<body>
+<div class="card">
+
+  <div id="start">
+    <h1>Conectar con Spotify</h1>
+    <p>Haz clic para autorizar el acceso. Vas a ver el login normal de Spotify, no compartimos tu contraseña con nada.</p>
+    <button id="btn-login">Conectar con Spotify</button>
+  </div>
+
+  <div id="done" class="hidden">
+    <h1>¡Listo!</h1>
+    <p>Copia este <b>refresh token</b> y pégalo en la configuración del widget:</p>
+    <textarea id="tokenBox" readonly></textarea>
+    <button class="copybtn" id="btn-copy">Copiar</button>
+    <p class="ok" id="copied" style="display:none;">Copiado ✓</p>
+    <p>Ya puedes cerrar esta pestaña.</p>
+  </div>
+
+  <div id="error" class="hidden">
+    <h1>Algo falló</h1>
+    <p id="errText"></p>
+  </div>
+
+</div>
+
+<script>
+const CLIENT_ID = "4d4f6fca21d24901a6b7d3326001c340";
+const REDIRECT_URI = window.location.origin + window.location.pathname;
+const SCOPES = "user-read-currently-playing user-read-playback-state";
+
+function b64url(bytes){
+  return btoa(String.fromCharCode(...new Uint8Array(bytes)))
+    .replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+async function sha256(str){
+  const data = new TextEncoder().encode(str);
+  return await crypto.subtle.digest('SHA-256', data);
+}
+function randomString(len){
+  const arr = new Uint8Array(len);
+  crypto.getRandomValues(arr);
+  return b64url(arr.buffer).slice(0, len);
+}
+
+async function startLogin(){
+  const verifier = randomString(64);
+  sessionStorage.setItem('pkce_verifier', verifier);
+  const challenge = b64url(await sha256(verifier));
+
+  const url = new URL('https://accounts.spotify.com/authorize');
+  url.searchParams.set('client_id', CLIENT_ID);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('redirect_uri', REDIRECT_URI);
+  url.searchParams.set('code_challenge_method', 'S256');
+  url.searchParams.set('code_challenge', challenge);
+  url.searchParams.set('scope', SCOPES);
+  window.location.href = url.toString();
+}
+
+async function handleCallback(code){
+  const verifier = sessionStorage.getItem('pkce_verifier');
+  const body = new URLSearchParams({
+    client_id: CLIENT_ID,
+    grant_type: 'authorization_code',
+    code: code,
+    redirect_uri: REDIRECT_URI,
+    code_verifier: verifier
+  });
+  const res = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: {'Content-Type':'application/x-www-form-urlencoded'},
+    body
+  });
+  const data = await res.json();
+  if(!res.ok){
+    document.getElementById('start').classList.add('hidden');
+    document.getElementById('error').classList.remove('hidden');
+    document.getElementById('errText').textContent = (data.error_description || data.error || 'Error desconocido');
+    return;
+  }
+  document.getElementById('start').classList.add('hidden');
+  document.getElementById('done').classList.remove('hidden');
+  document.getElementById('tokenBox').value = data.refresh_token;
+}
+
+document.getElementById('btn-login').addEventListener('click', startLogin);
+document.getElementById('btn-copy').addEventListener('click', () => {
+  const box = document.getElementById('tokenBox');
+  box.select();
+  document.execCommand('copy');
+  navigator.clipboard && navigator.clipboard.writeText(box.value).catch(()=>{});
+  document.getElementById('copied').style.display = 'block';
+});
+
+const params = new URLSearchParams(window.location.search);
+if(params.has('code')){
+  handleCallback(params.get('code'));
+} else if(params.has('error')){
+  document.getElementById('start').classList.add('hidden');
+  document.getElementById('error').classList.remove('hidden');
+  document.getElementById('errText').textContent = params.get('error');
+}
+</script>
+</body>
+</html>
